@@ -1,0 +1,50 @@
+# Project Overview
+name: FAL.AI Web Interface
+description: A modern web interface for FAL.AI API integration allowing users to input their API keys and interact with FAL's AI services.
+
+# Technical Stack
+framework: Next.js 14 (App Router)
+styling: Tailwind CSS + Shadcn UI
+language: TypeScript
+node_version: ">=20.0.0"
+
+# Key Features
+- User API key management
+- FAL.AI service integration
+- Real-time AI processing
+- Secure credential handling
+
+# Architecture Notes
+- Server components by default
+- Client components only when necessary (user interactions, state management)
+- API key storage in secure client-side storage
+- Server-side proxy implementation for FAL.AI requests
+
+
+# Dependencies
+- @fal-ai/client: Latest    # Official FAL.AI client
+- @fal-ai/server-proxy      # FAL.AI server proxy
+- shadcn/ui: Latest         # UI component library
+- tailwindcss: Latest       # Utility-first CSS
+
+# Security Considerations
+- API keys stored in encrypted client storage
+- Server-side proxy for secure API communication
+- No API keys in client-side code
+- Rate limiting implementation
+
+# Performance Optimization
+- React Server Components for initial render
+- Streaming responses for AI operations
+- Lazy loading for non-critical components
+- Image optimization for AI-generated content
+
+# State Management
+- React hooks for local state
+- Server actions for data mutations
+- Optimistic updates for better UX
+
+# Error Handling
+- Graceful fallbacks for API failures
+- User-friendly error messages
+- Request retry mechanisms
