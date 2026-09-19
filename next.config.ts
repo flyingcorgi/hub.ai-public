@@ -11,10 +11,9 @@ const nextConfig: NextConfig = {
     ],
   },
   experimental: {
-    // Server Actions default to a 1MB request body. generateWavespeed (and the FAL/Replicate/
-    // BytePlus equivalents) are called directly as Server Actions with reference images/audio
-    // embedded as base64 data URIs, which blows past 1MB for anything but a tiny image — the
-    // request never reaches the provider at all when that happens.
+    // Server Actions default to a 1MB request body. generateVenice is called directly as a
+    // Server Action with reference images embedded as base64 data URIs, which blows past 1MB
+    // for anything but a tiny image — the request never reaches Venice at all when that happens.
     serverActions: {
       bodySizeLimit: '25mb',
     },

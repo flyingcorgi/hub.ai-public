@@ -18,6 +18,9 @@ import {
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { SaveToAlbumButton } from "@/components/albums/save-to-album-button";
+import { useGenerationStore } from "@/components/albums/album-storage-provider";
+import { storageError } from "@/lib/private-storage/database";
 
 type NSFWFilter = "show" | "blur" | "hide";
 
@@ -27,8 +30,6 @@ interface GenerationsGalleryProps {
 }
 
 const ITEMS_PER_PAGE = 16;
-const GENERATIONS_STORAGE_KEY = "fal-ai-generations";
-const MAX_STORED_GENERATIONS = 60;
 
 const NSFW_OPTIONS = [
   { value: "blur", label: "Blur NSFW" },
@@ -68,30 +69,13 @@ async function downloadMedia(url: string, filename: string, contentType?: string
   }
 }
 
-function persistGenerations(generations: Generation[]) {
-  const cappedGenerations = generations.slice(0, MAX_STORED_GENERATIONS);
-
-  try {
-    localStorage.setItem(GENERATIONS_STORAGE_KEY, JSON.stringify(cappedGenerations));
-    return cappedGenerations;
-  } catch (error) {
-    if (
-      error instanceof DOMException &&
-      (error.name === "QuotaExceededError" || error.name === "NS_ERROR_DOM_QUOTA_REACHED")
-    ) {
-      const smallerGenerations = cappedGenerations.slice(0, 20);
-      localStorage.setItem(GENERATIONS_STORAGE_KEY, JSON.stringify(smallerGenerations));
-      return smallerGenerations;
-    }
-
-    throw error;
-  }
-}
-
 export function GenerationsGallery({
   generations,
   onGenerationsChange,
 }: GenerationsGalleryProps) {
+  const store = useGenerationStore();
+  const [storageFailure, setStorageFailure] = useState<string | null>(null);
+  const [mutating, setMutating] = useState(false);
   const [selectedImageIndex, setSelectedImageIndex] = useState<number | null>(null);
   const [selectedGeneration, setSelectedGeneration] = useState<Generation | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
@@ -103,6 +87,7 @@ export function GenerationsGallery({
   // Update localGenerations when props change
   useEffect(() => {
     setLocalGenerations(generations);
+    setSelectedGeneration(previous => previous ? generations.find(row => row.id === previous.id) ?? null : null);
   }, [generations]);
 
   // Derive available models from generations so new models (like Seedream) are included automatically
@@ -134,56 +119,28 @@ export function GenerationsGallery({
       gen.prompt.toLowerCase().includes(searchQuery.toLowerCase())
     );
 
+  const mutate = async (operation: () => Promise<void>) => {
+    if (mutating) return;
+    setMutating(true); setStorageFailure(null);
+    try {
+      await operation();
+      const rows = await store.list();
+      setLocalGenerations(rows); onGenerationsChange?.(rows);
+      setSelectedGeneration(previous => previous ? rows.find(row => row.id === previous.id) ?? null : null);
+    } catch (error) { setStorageFailure(storageError(error).message); }
+    finally { setMutating(false); }
+  };
   const handleNSFWToggle = (isNSFW: boolean) => {
-    if (!selectedGeneration) return;
-    
-    const updatedGenerations = localGenerations.map(gen => {
-      if (gen.id === selectedGeneration.id) {
-        return {
-          ...gen,
-          output: {
-            ...gen.output,
-            has_nsfw_concepts: [isNSFW]
-          }
-        };
-      }
-      return gen;
-    });
-
-    const persistedGenerations = persistGenerations(updatedGenerations);
-    setLocalGenerations(persistedGenerations);
-    onGenerationsChange?.(persistedGenerations);
-
-    // Update selected generation state
-    setSelectedGeneration(prev => prev ? {
-      ...prev,
-      output: {
-        ...prev.output,
-        has_nsfw_concepts: [isNSFW]
-      }
-    } : null);
+    if (!selectedGeneration || selectedImageIndex === null) return;
+    void mutate(() => store.setNsfw(selectedGeneration.id, selectedImageIndex, isNSFW));
   };
-
   const handleDelete = (generationId: string) => {
-    const updatedGenerations = localGenerations.filter(gen => gen.id !== generationId);
-    
-    const persistedGenerations = persistGenerations(updatedGenerations);
-    setLocalGenerations(persistedGenerations);
-    onGenerationsChange?.(persistedGenerations);
-    
-    // Close lightbox if the deleted image was being viewed
-    if (selectedGeneration?.id === generationId) {
-      setSelectedGeneration(null);
-      setSelectedImageIndex(null);
-    }
+    void mutate(() => store.remove([generationId]));
   };
-
   const handleClearHistory = () => {
-    localStorage.removeItem(GENERATIONS_STORAGE_KEY);
-    setLocalGenerations([]);
-    onGenerationsChange?.([]);
-    setSelectedGeneration(null);
-    setSelectedImageIndex(null);
+    if (!window.confirm("Delete all currently loaded history in this account/device namespace? Export a backup first. Original legacy history will not be deleted.")) return;
+    // Delete captured IDs only: never erase records arriving from another tab after this view loaded.
+    void mutate(() => store.remove(localGenerations.map(row => row.id)));
     setCurrentPage(1);
   };
 
@@ -195,6 +152,7 @@ export function GenerationsGallery({
 
   return (
     <div className="w-full space-y-4">
+      {storageFailure && <p role="alert" className="text-sm text-destructive">{storageFailure}</p>}
       <div className="flex flex-col gap-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <h2 className="text-xl sm:text-2xl font-bold">Previous Generations</h2>
@@ -206,6 +164,7 @@ export function GenerationsGallery({
                 variant="outline"
                 size="sm"
                 onClick={handleClearHistory}
+                disabled={mutating}
                 className="gap-2"
               >
                 <Trash2 className="h-4 w-4" />
@@ -309,7 +268,7 @@ export function GenerationsGallery({
               {Array.from({ length: totalPages }, (_, i) => i + 1)
                 .filter(page => {
                   // On mobile, show fewer page numbers
-                  if (window.innerWidth < 640) {
+                  if (typeof window !== "undefined" && window.innerWidth < 640) {
                     return page === 1 || 
                            page === totalPages || 
                            page === currentPage ||
@@ -405,19 +364,25 @@ export function GenerationsGallery({
                           )}
                         </Badge>
                       </div>
-                      <div className="absolute top-2 right-2 flex gap-2">
+                      <div className="absolute top-2 right-2 flex gap-2" onClick={(e) => e.stopPropagation()}>
+                        {!isVideo && (
+                          <SaveToAlbumButton
+                            imageUrl={media.url}
+                            prompt={generation.prompt}
+                            modelName={generation.modelName}
+                          />
+                        )}
                         <Button
                           size="icon"
                           variant="ghost"
                           className="h-8 w-8 bg-black/20 hover:bg-black/40 backdrop-blur-[2px] text-white"
-                          onClick={(e) => {
-                            e.stopPropagation();
+                          onClick={() =>
                             downloadMedia(
                               media.url,
                               `generation-${generation.id}`,
                               media.content_type
-                            );
-                          }}
+                            )
+                          }
                         >
                           <Download className="h-4 w-4" />
                           <span className="sr-only">Download image</span>
@@ -487,6 +452,15 @@ export function GenerationsGallery({
             onNSFWToggle={handleNSFWToggle}
           >
             <div className="space-y-4">
+              {!media.content_type?.startsWith("video/") && (
+                <SaveToAlbumButton
+                  imageUrl={media.url}
+                  prompt={selectedGeneration.prompt}
+                  modelName={selectedGeneration.modelName}
+                  variant="full"
+                  className="w-full"
+                />
+              )}
               <div>
                 <h3 className="font-medium mb-1">Prompt</h3>
                 <p className="text-sm text-muted-foreground">{selectedGeneration.prompt}</p>

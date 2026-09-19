@@ -29,8 +29,11 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { Image, Generation, Model, ModelParameter } from "@/lib/types";
 import { allModels } from "@/lib/models/registry";
-import { modelNavGroups, modelById, providerFor } from "@/lib/models/nav-groups";
+import { modelNavGroups, modelById } from "@/lib/models/nav-groups";
 import { GenerationsGallery } from "@/components/image-generator/generations-gallery";
+import { AlbumImagePicker } from "@/components/albums/album-image-picker";
+import { useGenerationHistory } from "@/hooks/use-generation-history";
+import { storageError } from "@/lib/private-storage/database";
 import {
   CustomPromptTemplate,
   loadCustomPromptTemplates,
@@ -54,7 +57,6 @@ import {
 } from "lucide-react";
 
 type JobStatus = "idle" | "queued" | "processing" | "completed" | "failed";
-export type ProviderKind = "wavespeed" | "replicate" | "fal" | "byteplus";
 
 export interface BatchJob {
   id: string;
@@ -85,47 +87,19 @@ export interface BatchTemplate {
   updatedAt: number;
 }
 
-const FAL_API_KEY_STORAGE_KEY = "fal-ai-api-key";
-const WAVESPEED_API_KEY_STORAGE_KEY = "wavespeed-api-key";
-const REPLICATE_API_KEY_STORAGE_KEY = "replicate-api-key";
-const BYTEPLUS_API_KEY_STORAGE_KEY = "byteplus-api-key";
-const GENERATIONS_STORAGE_KEY = "fal-ai-generations";
+const VENICE_API_KEY_STORAGE_KEY = "venice-api-key";
 // v2: the batch tool used to only support 4 hand-picked models via a closed `Target` union.
 // Now any model in the registry can be selected, so jobs are keyed generically by that model's
 // own parameter names instead of a handful of fixed fields — a different enough on-disk shape
 // that this bumps the storage key rather than migrating v1 data.
 const BATCH_STORAGE_KEY = "seedream-batch-automation-v2";
 const TEMPLATES_STORAGE_KEY = "seedream-batch-templates-v2";
-const MAX_STORED_GENERATIONS = 60;
 const DEFAULT_BATCH_SIZE = 10;
 const MAX_BATCH_SIZE = 50;
 const DEFAULT_CONCURRENCY = 3;
 const MAX_CONCURRENCY = 10;
 const WORKER_START_STAGGER_MS = 300;
-const DEFAULT_MODEL_ID = "bytedance/seedream-v4.5/edit";
-
-const WAVESPEED_ASPECT_RATIOS: { label: string; sizes: Record<"2K" | "4K", string> }[] = [
-  { label: "1:1", sizes: { "2K": "2048*2048", "4K": "4096*4096" } },
-  { label: "16:9", sizes: { "2K": "2560*1440", "4K": "3840*2160" } },
-  { label: "9:16", sizes: { "2K": "1440*2560", "4K": "2160*3840" } },
-  { label: "4:3", sizes: { "2K": "2304*1728", "4K": "3840*2880" } },
-  { label: "3:4", sizes: { "2K": "1728*2304", "4K": "2880*3840" } },
-  { label: "3:2", sizes: { "2K": "2432*1664", "4K": "3840*2560" } },
-  { label: "2:3", sizes: { "2K": "1664*2432", "4K": "2560*3840" } },
-];
-
-// Z-Image Turbo LoRA only reliably works around "1K" scale (max side 1440), unlike the other
-// WaveSpeed models WAVESPEED_ASPECT_RATIOS is shared across — so it gets its own, smaller preset
-// list instead of a 2K/4K resolution toggle.
-const Z_IMAGE_ASPECT_RATIOS: { label: string; size: string }[] = [
-  { label: "1:1", size: "1440*1440" },
-  { label: "16:9", size: "1280*720" },
-  { label: "9:16", size: "720*1280" },
-  { label: "4:3", size: "1280*960" },
-  { label: "3:4", size: "960*1280" },
-  { label: "3:2", size: "1248*832" },
-  { label: "2:3", size: "832*1248" },
-];
+const DEFAULT_MODEL_ID = "venice/seedream-v5-pro";
 
 // Prompt (and occasionally one other field) worth pre-filling for specific models, carried over
 // from earlier iterations of this tool. Keyed by model id so it's easy to extend.
@@ -151,43 +125,10 @@ export function isExcludedParamKey(key: string): boolean {
   return EXCLUDED_PARAM_KEYS.has(key) || key.endsWith("loras");
 }
 
-export function providerKindFor(modelId: string): ProviderKind {
-  const provider = providerFor(modelId);
-  if (provider === "WaveSpeed") return "wavespeed";
-  if (provider === "Replicate") return "replicate";
-  if (provider === "BytePlus") return "byteplus";
-  return "fal";
-}
-
-export function providerLabel(providerKind: ProviderKind) {
-  switch (providerKind) {
-    case "wavespeed":
-      return "WaveSpeed";
-    case "replicate":
-      return "Replicate";
-    case "byteplus":
-      return "BytePlus";
-    default:
-      return "FAL.AI";
-  }
-}
-
-export function apiKeyFor(providerKind: ProviderKind): string | null {
-  switch (providerKind) {
-    case "wavespeed":
-      return localStorage.getItem(WAVESPEED_API_KEY_STORAGE_KEY) ?? process.env.NEXT_PUBLIC_WAVESPEED_API_KEY ?? null;
-    case "replicate":
-      return localStorage.getItem(REPLICATE_API_KEY_STORAGE_KEY) ?? process.env.NEXT_PUBLIC_REPLICATE_API_KEY ?? null;
-    case "byteplus":
-      return (
-        localStorage.getItem(BYTEPLUS_API_KEY_STORAGE_KEY) ??
-        process.env.NEXT_PUBLIC_BYTEPLUS_API_KEY ??
-        process.env.NEXT_PUBLIC_ARK_API_KEY ??
-        null
-      );
-    default:
-      return localStorage.getItem(FAL_API_KEY_STORAGE_KEY) ?? process.env.NEXT_PUBLIC_API_KEY ?? null;
-  }
+// Every model in the registry runs on Venice.ai now, so the batch tool reads the single
+// Venice API key (same storage key the rest of the app uses).
+export function getVeniceApiKey(): string | null {
+  return localStorage.getItem(VENICE_API_KEY_STORAGE_KEY) ?? process.env.NEXT_PUBLIC_VENICE_API_KEY ?? null;
 }
 
 export function combinePrompt(prompt: string, appendText: string) {
@@ -234,29 +175,6 @@ function validateJob(job: BatchJob, model: Model): string | null {
     }
   }
   return null;
-}
-
-function isQuotaExceededError(error: unknown) {
-  return (
-    error instanceof DOMException &&
-    (error.name === "QuotaExceededError" || error.name === "NS_ERROR_DOM_QUOTA_REACHED")
-  );
-}
-
-// Progressively shrinks the list on quota errors instead of throwing, since a single retry
-// at a fixed size can still overflow (e.g. if entries embed large reference images).
-function persistGenerations(generations: Generation[]) {
-  const capped = generations.slice(0, MAX_STORED_GENERATIONS);
-  for (const attempt of [capped, capped.slice(0, 20), capped.slice(0, 5), []]) {
-    try {
-      localStorage.setItem(GENERATIONS_STORAGE_KEY, JSON.stringify(attempt));
-      return attempt;
-    } catch (error) {
-      if (!isQuotaExceededError(error)) throw error;
-    }
-  }
-  console.error("Failed to persist generation history: localStorage quota exceeded.");
-  return capped;
 }
 
 // Reference images/audio can be several MB of embedded data URIs; the gallery only ever
@@ -357,7 +275,6 @@ export type GenerateApiResponse = GenerateApiSuccess | GenerateApiError;
 // silently defeats the batch's client-side concurrency (jobs would run one after another no
 // matter how many are "launched" at once). A regular fetch() has no such queue.
 export async function callGenerateApi(
-  providerKind: ProviderKind,
   model: Model,
   payload: Record<string, unknown>,
   apiKey: string
@@ -366,7 +283,7 @@ export async function callGenerateApi(
     const res = await fetch("/api/batch-generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ providerKind, model, payload, apiKey }),
+      body: JSON.stringify({ model, payload, apiKey }),
     });
     const data = await res.json();
     if (data && typeof data === "object" && "success" in data) {
@@ -477,6 +394,7 @@ function ImagesEditor({
             Upload
           </Button>
         </div>
+        <AlbumImagePicker onPick={(url) => onChange([...images, url])} />
       </div>
     </div>
   );
@@ -539,6 +457,7 @@ function SingleImageSlot({
             Upload
           </Button>
         </div>
+        <AlbumImagePicker onPick={(url) => onChange(url)} />
       </div>
     </div>
   );
@@ -600,86 +519,6 @@ function SingleAudioSlot({
   );
 }
 
-function WaveSpeedSizePicker({
-  value,
-  onChange,
-}: {
-  value: string;
-  onChange: (size: string) => void;
-}) {
-  const isFourK = WAVESPEED_ASPECT_RATIOS.some((ratio) => ratio.sizes["4K"] === value);
-  const [resolution, setResolution] = useState<"2K" | "4K">(isFourK ? "4K" : "2K");
-  const activeLabel = WAVESPEED_ASPECT_RATIOS.find((ratio) => ratio.sizes[resolution] === value)?.label;
-
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <Label className="text-xs text-muted-foreground">Size (width*height)</Label>
-        <div className="flex gap-1">
-          {(["2K", "4K"] as const).map((res) => (
-            <Button
-              key={res}
-              type="button"
-              size="sm"
-              variant={resolution === res ? "default" : "outline"}
-              className="h-6 px-2 text-xs"
-              onClick={() => setResolution(res)}
-            >
-              {res}
-            </Button>
-          ))}
-        </div>
-      </div>
-      <div className="flex flex-wrap gap-1.5">
-        {WAVESPEED_ASPECT_RATIOS.map((ratio) => (
-          <Button
-            key={ratio.label}
-            type="button"
-            size="sm"
-            variant={activeLabel === ratio.label ? "default" : "outline"}
-            className="h-7 px-2 text-xs"
-            onClick={() => onChange(ratio.sizes[resolution])}
-          >
-            {ratio.label}
-          </Button>
-        ))}
-      </div>
-      <Input value={value} className="h-8 w-40" onChange={(e) => onChange(e.target.value)} />
-    </div>
-  );
-}
-
-function ZImageSizePicker({
-  value,
-  onChange,
-}: {
-  value: string;
-  onChange: (size: string) => void;
-}) {
-  const activeLabel = Z_IMAGE_ASPECT_RATIOS.find((ratio) => ratio.size === value)?.label;
-
-  return (
-    <div className="space-y-2">
-      <Label className="text-xs text-muted-foreground">Size (width*height)</Label>
-      <div className="flex flex-wrap gap-1.5">
-        {Z_IMAGE_ASPECT_RATIOS.map((ratio) => (
-          <Button
-            key={ratio.label}
-            type="button"
-            size="sm"
-            variant={activeLabel === ratio.label ? "default" : "outline"}
-            className="h-7 px-2 text-xs"
-            onClick={() => onChange(ratio.size)}
-          >
-            {ratio.label}
-          </Button>
-        ))}
-      </div>
-      <Input value={value} className="h-8 w-40" onChange={(e) => onChange(e.target.value)} />
-    </div>
-  );
-}
-
 // Renders one input field generically from a model's own schema. This is what lets the batch
 // tool support every model in the registry without hand-coding each one's fields — "prompt" and
 // "loras" are skipped (prompt has its own dedicated textarea above; a per-job LoRA picker isn't
@@ -691,27 +530,6 @@ export function renderJobParameter(
   onChange: (value: unknown) => void
 ) {
   if (isExcludedParamKey(param.key)) return null;
-
-  // These models' "size" field is a free-form "W*H" string (not an enum), so an aspect-ratio
-  // button picker is worth keeping instead of a plain text box.
-  if (param.key === "size" && modelId === "bytedance/seedream-v4.5/edit") {
-    return (
-      <WaveSpeedSizePicker
-        key={param.key}
-        value={typeof value === "string" ? value : ""}
-        onChange={onChange}
-      />
-    );
-  }
-  if (param.key === "size" && modelId === "wavespeed-ai/z-image/turbo-lora") {
-    return (
-      <ZImageSizePicker
-        key={param.key}
-        value={typeof value === "string" ? value : ""}
-        onChange={onChange}
-      />
-    );
-  }
 
   switch (param.type) {
     case "image":
@@ -1039,7 +857,19 @@ export function BatchSeedreamGenerator() {
   const [isBatchRunning, setIsBatchRunning] = useState(false);
   const [showJsonEditor, setShowJsonEditor] = useState(false);
   const [jsonDraft, setJsonDraft] = useState("");
-  const [generations, setGenerations] = useState<Generation[]>([]);
+  const { store: history, generations, setGenerations, error: historyLoadError } = useGenerationHistory();
+  const [historySaveError, setHistorySaveError] = useState<string | null>(null);
+  const [unsavedHistory, setUnsavedHistory] = useState<Record<string, Generation>>({});
+  const [retryingHistory, setRetryingHistory] = useState(false);
+  const persistHistoryRecord = async (record: Generation) => {
+    try {
+      await history.add(record);
+      setUnsavedHistory(previous => { const next = { ...previous }; delete next[record.id]; return next; });
+    } catch (cause) {
+      setUnsavedHistory(previous => ({ ...previous, [record.id]: record }));
+      setHistorySaveError(storageError(cause).message);
+    }
+  };
   const [hydrated, setHydrated] = useState(false);
   const [templates, setTemplates] = useState<BatchTemplate[]>([]);
   const [activeTemplateId, setActiveTemplateId] = useState<string | null>(null);
@@ -1085,16 +915,6 @@ export function BatchSeedreamGenerator() {
         console.error("Failed to load saved templates:", error);
       }
 
-      const savedGenerations = localStorage.getItem(GENERATIONS_STORAGE_KEY);
-      if (savedGenerations) {
-        try {
-          const parsed = JSON.parse(savedGenerations);
-          if (Array.isArray(parsed)) setGenerations(parsed);
-        } catch (error) {
-          console.error("Failed to parse saved generations:", error);
-        }
-      }
-
       setCustomPromptTemplates(loadCustomPromptTemplates());
 
       setHydrated(true);
@@ -1128,14 +948,14 @@ export function BatchSeedreamGenerator() {
     const anyJobBusy = Object.values(results).some(
       (r) => r.status === "queued" || r.status === "processing"
     );
-    if (!anyJobBusy) return;
+    if (!anyJobBusy && Object.keys(unsavedHistory).length === 0) return;
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       e.preventDefault();
       e.returnValue = "";
     };
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [results]);
+  }, [results, unsavedHistory]);
 
   const updateJob = (id: string, patch: Partial<BatchJob>) => {
     setJobs((prev) => prev.map((job) => (job.id === id ? { ...job, ...patch } : job)));
@@ -1336,7 +1156,7 @@ export function BatchSeedreamGenerator() {
     setJobs((prev) => prev.map(() => createJob(nextModelId)));
   };
 
-  const saveGenerationRecord = (
+  const saveGenerationRecord = async (
     job: BatchJob,
     forModel: Model,
     images: Image[],
@@ -1356,7 +1176,7 @@ export function BatchSeedreamGenerator() {
       },
       timestamp: Date.now(),
     };
-    setGenerations((prev) => persistGenerations([newGeneration, ...prev]));
+    await persistHistoryRecord(newGeneration);
   };
 
   const runJob = async (job: BatchJob) => {
@@ -1366,13 +1186,12 @@ export function BatchSeedreamGenerator() {
       return;
     }
 
-    const providerKind = providerKindFor(model.id);
-    const apiKey = apiKeyFor(providerKind);
+    const apiKey = getVeniceApiKey();
 
-    if (!apiKey && providerKind !== "replicate" && providerKind !== "byteplus") {
+    if (!apiKey) {
       setResults((prev) => ({
         ...prev,
-        [job.id]: { status: "failed", error: `Missing ${providerLabel(providerKind)} API key` },
+        [job.id]: { status: "failed", error: "Missing Venice.ai API key" },
       }));
       return;
     }
@@ -1382,7 +1201,9 @@ export function BatchSeedreamGenerator() {
     const payload = buildPayload(job, appendText);
 
     try {
-      const response = await callGenerateApi(providerKind, model, payload, apiKey ?? "");
+      history.assertActive(); // Stop queued jobs if their captured account has been closed.
+      const response = await callGenerateApi(model, payload, apiKey);
+      history.assertActive();
 
       if (response.success) {
         const outputImages = response.images ?? [response.image];
@@ -1390,7 +1211,7 @@ export function BatchSeedreamGenerator() {
           ...prev,
           [job.id]: { status: "completed", images: outputImages, requestId: response.requestId },
         }));
-        saveGenerationRecord(job, model, outputImages, response);
+        await saveGenerationRecord(job, model, outputImages, response);
       } else {
         setResults((prev) => ({ ...prev, [job.id]: { status: "failed", error: response.error } }));
       }
@@ -1509,6 +1330,16 @@ export function BatchSeedreamGenerator() {
 
   return (
     <div className="flex flex-col space-y-6 w-full max-w-6xl mx-auto">
+      {(Object.keys(unsavedHistory).length > 0 || historyLoadError) && <div role="alert" className="rounded-lg border p-4 text-sm space-y-2">
+        <p>{Object.keys(unsavedHistory).length > 0 ? historySaveError : historyLoadError}</p>
+        {Object.keys(unsavedHistory).length > 0 && <><p>{Object.keys(unsavedHistory).length} completed results are not saved to history. Download results before leaving or retry local saving. Do not regenerate.</p>
+          <Button variant="outline" disabled={retryingHistory} onClick={async () => {
+            setRetryingHistory(true);
+            try { for (const record of Object.values(unsavedHistory)) await persistHistoryRecord(record); }
+            finally { setRetryingHistory(false); }
+          }}>Retry saving history</Button></>}
+        <a className="block underline" href="/queue">History backups and import</a>
+      </div>}
       <Card>
         <CardHeader>
           <CardTitle>Batch Automation</CardTitle>

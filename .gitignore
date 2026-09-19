@@ -36,6 +36,12 @@ yarn-error.log*
 # vercel
 .vercel
 
+# local persisted app data (workflow designer definitions, etc.)
+/data
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local PGlite development database (npm run db:local)
+/.localdb

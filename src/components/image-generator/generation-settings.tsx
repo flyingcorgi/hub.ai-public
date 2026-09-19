@@ -34,10 +34,10 @@ import {
   Save,
   Trash2,
 } from "lucide-react";
-import { fal } from "@fal-ai/client";
 import { useToast } from "@/hooks/use-toast";
 import { useEffect, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
+import { AlbumImagePicker } from "@/components/albums/album-image-picker";
 import {
   CustomPromptTemplate,
   loadCustomPromptTemplates,
@@ -73,7 +73,6 @@ export function GenerationSettings({
   const [showSaveTemplateInput, setShowSaveTemplateInput] = useState(false);
   const [templateNameDraft, setTemplateNameDraft] = useState("");
   const [templateCategoryDraft, setTemplateCategoryDraft] = useState("");
-
   useEffect(() => {
     setCustomTemplates(loadCustomPromptTemplates());
   }, []);
@@ -160,23 +159,14 @@ export function GenerationSettings({
 
   const handleFileUpload = async (file: File): Promise<string | null> => {
     try {
-      const apiKey = localStorage.getItem('fal-ai-api-key') ?? process.env.NEXT_PUBLIC_API_KEY;
-      
-      if (!apiKey) {
-        toast({
-          title: "API Key Required",
-          description: "Please set your FAL.AI API key first to upload files.",
-          variant: "destructive",
-        });
-        return null;
-      }
-
-      fal.config({
-        credentials: apiKey,
+      // Embedded as a data URI — Venice accepts data URLs directly for file inputs, so no
+      // third-party storage upload is needed.
+      return await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(file);
       });
-
-      const url = await fal.storage.upload(file);
-      return url;
     } catch (error) {
       console.error("Upload failed:", error);
       toast({
@@ -195,6 +185,7 @@ export function GenerationSettings({
     onChange,
     showLabel = true,
     helperText = "Paste a public image URL or upload a local image (converted to a data URI).",
+    tagIndex = 0,
   }: {
     id: string;
     label: string;
@@ -202,6 +193,7 @@ export function GenerationSettings({
     onChange: (val: string) => void;
     showLabel?: boolean;
     helperText?: string;
+    tagIndex?: number;
   }) => {
     const stringValue = typeof value === "string" ? value : "";
     const showUrl = stringValue.startsWith("data:") ? "" : stringValue;
@@ -236,10 +228,21 @@ export function GenerationSettings({
           <Input
             type="file"
             accept="image/*"
-            className="h-8"
+            className="h-8 w-auto flex-1 min-w-[10rem]"
             onChange={(e) => {
               handleUpload(e.target.files);
               e.currentTarget.value = "";
+            }}
+          />
+          <AlbumImagePicker
+            onPick={(url, tags) => {
+              onChange(url);
+              if (tags && tags.length > 0) {
+                const directive = `Use ${tags.join(", ")} from @image${tagIndex}`;
+                // Only inject if not already present
+                if (prompt.includes(directive)) return;
+                setPrompt(prompt ? `${prompt}. ${directive}` : directive);
+              }
             }}
           />
           {hasUpload && (
@@ -1074,6 +1077,8 @@ export function GenerationSettings({
         }
         if (param.items?.type === "image") {
           const imageArray = Array.isArray(value) ? value : [];
+          const maxImages = param.validation?.max;
+          const atMax = typeof maxImages === "number" && imageArray.length >= maxImages;
           const addImage = () => onChange([...(imageArray || []), ""]);
           const updateImage = (index: number, newValue: string) => {
             const next = [...imageArray];
@@ -1089,8 +1094,11 @@ export function GenerationSettings({
           return (
             <div key={param.key} className="space-y-3">
               <div className="flex items-center justify-between">
-                <Label className="text-sm">{formatLabel(param.key)}</Label>
-                <Button size="sm" variant="outline" onClick={addImage}>
+                <Label className="text-sm">
+                  {formatLabel(param.key)}
+                  {typeof maxImages === "number" ? ` (${imageArray.length}/${maxImages})` : ""}
+                </Label>
+                <Button size="sm" variant="outline" onClick={addImage} disabled={atMax}>
                   Add Image
                 </Button>
               </div>
@@ -1122,6 +1130,7 @@ export function GenerationSettings({
                       value: entry,
                       onChange: (val) => updateImage(index, val),
                       showLabel: false,
+                      tagIndex: index,
                     })}
                   </div>
                 ))}
@@ -1159,10 +1168,10 @@ export function GenerationSettings({
 
   // Group parameters by type for more efficient layout
   const groupParameters = () => {
-    const enumParams: JSX.Element[] = [];
-    const booleanParams: JSX.Element[] = [];
-    const numberParams: JSX.Element[] = [];
-    const otherParams: JSX.Element[] = [];
+    const enumParams: React.JSX.Element[] = [];
+    const booleanParams: React.JSX.Element[] = [];
+    const numberParams: React.JSX.Element[] = [];
+    const otherParams: React.JSX.Element[] = [];
 
     model.inputSchema.forEach(param => {
       const rendered = renderParameter(param);
@@ -1194,7 +1203,7 @@ export function GenerationSettings({
         <CardHeader className="pb-4">
           <CardTitle>Settings</CardTitle>
           <CardDescription>
-            Configure your {model.mediaType === "video" ? "video" : "image"} generation for {model.name}
+            Prompt, parameters, and reference {model.mediaType === "video" ? "media" : "images"} for this model.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -1321,7 +1330,7 @@ export function GenerationSettings({
             </div>
             <Textarea
               id="prompt"
-              placeholder="Enter your image generation prompt..."
+              placeholder={model.mediaType === "video" ? "Describe the scene and motion you want…" : "Describe the image you want to create or the changes to make…"}
               value={prompt}
               onChange={(e) => {
                 setSelectedPromptTemplateId(undefined);
@@ -1355,20 +1364,26 @@ export function GenerationSettings({
           {/* Other parameters (like LoRA and Audio) */}
           {otherParams}
         </CardContent>
-        <CardFooter>
-          <Button 
-            onClick={onGenerate}
-            disabled={isGenerating || !prompt}
-            className="w-full"
-          >
-            {isGenerating
-              ? model.mediaType === "video"
-                ? "Generating Video..."
-                : "Generating Image..."
-              : model.mediaType === "video"
-                ? "Generate Video"
-                : "Generate Image"}
-          </Button>
+        <CardFooter className="flex-col items-stretch gap-2">
+          <div className="relative">
+            <Button
+              onClick={onGenerate}
+              disabled={isGenerating}
+              className="w-full"
+            >
+              {isGenerating
+                ? model.mediaType === "video"
+                  ? "Generating Video..."
+                  : "Generating Image..."
+                : model.mediaType === "video"
+                  ? "Generate Video"
+                  : "Generate Image"}
+            </Button>
+          </div>
+          <p className="text-center text-xs text-muted-foreground">
+            No FetishUI membership required. Venice usage is billed separately.
+            {model.costEstimate && <> Estimated cost: {model.costEstimate}.</>}
+          </p>
         </CardFooter>
       </Card>
     </TooltipProvider>

@@ -9,28 +9,31 @@ body {
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 240 10% 3.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 240 10% 3.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 240 10% 3.9%;
-    /* Indigo brand color — used for primary actions, focus rings, and the active-tab/accent
+    /* Same near-black surface palette as the sidebar (see dashboard/sidebar.tsx's
+       bg-[#0b0b0d]) — the app is dark-first like Higgsfield, so "light" mode no longer means
+       a white background, just this same dark surface. */
+    --background: 240 10% 5%;
+    --foreground: 0 0% 96%;
+    --card: 240 8% 10%;
+    --card-foreground: 0 0% 96%;
+    --popover: 240 8% 11%;
+    --popover-foreground: 0 0% 96%;
+    /* Pink brand color — used for primary actions, focus rings, and the active-tab/accent
        treatment, so the app reads as one designed product instead of every surface defaulting
        to the same flat black-and-white shadcn starter palette. */
-    --primary: 243 75% 59%;
+    --primary: 330 81% 60%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 240 4.8% 95.9%;
-    --secondary-foreground: 240 5.9% 10%;
-    --muted: 240 4.8% 95.9%;
-    --muted-foreground: 240 3.8% 46.1%;
-    --accent: 243 100% 97%;
-    --accent-foreground: 243 60% 32%;
+    --secondary: 240 6% 17%;
+    --secondary-foreground: 0 0% 96%;
+    --muted: 240 6% 16%;
+    --muted-foreground: 240 5% 70%;
+    --accent: 330 45% 18%;
+    --accent-foreground: 330 90% 88%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
-    --border: 240 5.9% 90%;
-    --input: 240 5.9% 90%;
-    --ring: 243 75% 59%;
+    --border: 240 6% 24%;
+    --input: 240 6% 24%;
+    --ring: 330 81% 60%;
     --chart-1: 12 76% 61%;
     --chart-2: 173 58% 39%;
     --chart-3: 197 37% 24%;
@@ -47,20 +50,20 @@ body {
     --card-foreground: 0 0% 96%;
     --popover: 240 8% 11%;
     --popover-foreground: 0 0% 96%;
-    /* Orange accent in dark mode only — light mode keeps the indigo brand color. */
-    --primary: 24 94% 53%;
+    /* Same pink brand color as light mode, brightened slightly for contrast on dark surfaces. */
+    --primary: 330 85% 65%;
     --primary-foreground: 0 0% 100%;
     --secondary: 240 6% 17%;
     --secondary-foreground: 0 0% 96%;
     --muted: 240 6% 16%;
     --muted-foreground: 240 5% 70%;
-    --accent: 24 40% 18%;
-    --accent-foreground: 24 90% 88%;
+    --accent: 330 45% 18%;
+    --accent-foreground: 330 90% 88%;
     --destructive: 0 70% 45%;
     --destructive-foreground: 0 0% 98%;
     --border: 240 6% 24%;
     --input: 240 6% 24%;
-    --ring: 24 94% 53%;
+    --ring: 330 85% 65%;
     --chart-1: 220 70% 50%;
     --chart-2: 160 60% 45%;
     --chart-3: 30 80% 55%;
@@ -83,4 +86,36 @@ button, a, [role="button"], select, summary,
 [type="button"], [type="reset"], [type="submit"], 
 [type="checkbox"], [type="radio"] {
   cursor: pointer;
+}
+
+/* Ripple animation for goon game stroke button */
+@keyframes ripple {
+  0% {
+    transform: scale(0);
+    opacity: 0.5;
+  }
+  100% {
+    transform: scale(4);
+    opacity: 0;
+  }
+}
+
+.animate-ripple {
+  animation: ripple 0.6s ease-out forwards;
+}
+
+/* Goon Game title dot — slow breathing glow + scale, replaces the static circle */
+@keyframes goon-pulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 6px 0 hsl(var(--primary) / 0.6);
+  }
+  50% {
+    transform: scale(1.25);
+    box-shadow: 0 0 16px 4px hsl(var(--primary) / 0.9);
+  }
+}
+
+.animate-goon-pulse {
+  animation: goon-pulse 1.8s ease-in-out infinite;
 }

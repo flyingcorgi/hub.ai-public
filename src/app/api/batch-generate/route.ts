@@ -1,11 +1,7 @@
-import { NextRequest, NextResponse } from "next/server";
-import { generateWavespeed } from "@/lib/actions/generate-wavespeed";
-import { generateReplicate } from "@/lib/actions/generate-replicate";
-import { generateImage } from "@/lib/actions/generate-image";
-import { generateBytePlus } from "@/lib/actions/generate-byteplus";
+import { NextRequest } from "next/server";
+import { privateJson } from "@/lib/privacy/responses";
+import { generateVenice } from "@/lib/actions/generate-venice";
 import { Model } from "@/lib/types";
-
-type ProviderKind = "wavespeed" | "replicate" | "fal" | "byteplus";
 
 // Plain Route Handler (not a Server Action) so the batch generator's concurrent fetch() calls
 // actually run in parallel — Next.js serializes Server Actions invoked directly from a client
@@ -13,31 +9,20 @@ type ProviderKind = "wavespeed" | "replicate" | "fal" | "byteplus";
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { providerKind, model, payload, apiKey } = body as {
-      providerKind: ProviderKind;
+    const { model, payload, apiKey } = body as {
       model: Model;
       payload: Record<string, unknown>;
       apiKey: string;
     };
 
-    switch (providerKind) {
-      case "wavespeed":
-        return NextResponse.json(await generateWavespeed(model, payload, apiKey));
-      case "replicate":
-        return NextResponse.json(await generateReplicate(model, payload, apiKey));
-      case "byteplus":
-        return NextResponse.json(await generateBytePlus(model, payload, apiKey));
-      case "fal":
-        return NextResponse.json(await generateImage(model, payload, apiKey));
-      default:
-        return NextResponse.json({ success: false, error: "Invalid provider" }, { status: 400 });
-    }
-  } catch (error) {
+    return privateJson(await generateVenice(model, payload, apiKey));
+  } catch {
     // Never let a parse/routing failure here fall through to Next's generic HTML error page —
     // the client expects JSON and a raw HTML response reads as "the payload never arrived".
-    return NextResponse.json({
+    // JSON parser errors can quote the body, so never return their raw message.
+    return privateJson({
       success: false,
-      error: error instanceof Error ? error.message : "Failed to process batch generation request",
+      error: "Failed to process batch generation request",
     });
   }
 }

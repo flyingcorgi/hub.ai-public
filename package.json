@@ -1,16 +1,41 @@
 {
-  "name": "simple-fluex-api-ui",
+  "name": "fetishui",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=22.15.0"
+  },
+  "overrides": {
+    "next": {
+      "postcss": "^8.5.28"
+    },
+    "brace-expansion@^1.1.7": "1.1.18"
+  },
   "scripts": {
-    "dev": "next dev --turbopack",
+    "dev": "next dev --turbopack -p 4000",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "tsx --test tests/*.test.ts",
+    "test:albums": "tsx --test tests/album-storage.test.ts tests/album-export.test.ts",
+    "test:game": "tsx --test tests/game-storage.test.ts",
+    "test:wizard": "tsx --test tests/workflow-wizard.test.ts tests/workflow-wizard-qualification.test.ts tests/workflow-access.test.ts tests/workflow-validation.test.ts",
+    "wizard:qualify": "node --env-file-if-exists=.env.local --import tsx scripts/qualify-wizard.ts",
+    "test:browser:wizard": "npm run build && BROWSER_SMOKE_ONLY=wizard tsx tests/browser/workflows.smoke.ts",
+    "test:history": "tsx --test tests/generation-storage.test.ts",
+    "test:browser:history": "npm run build && BROWSER_SMOKE_ONLY=history tsx tests/browser/workflows.smoke.ts",
+    "test:browser": "npm run build && tsx tests/browser/workflows.smoke.ts",
+    "typecheck": "tsc --noEmit --incremental false",
+    "db:migrate": "node --env-file-if-exists=.env.local --import tsx scripts/migrate.ts",
+    "db:local": "pglite-server --db=.localdb/pgdata --port=54320 --max-connections=20",
+    "workflows:import": "node --env-file-if-exists=.env.local --import tsx scripts/import-workflows.ts",
+    "auth:promote-admin": "node --env-file-if-exists=.env.local --import tsx scripts/promote-admin.ts",
+    "auth:seed-dev-admin": "node --env-file-if-exists=.env.local --import tsx scripts/seed-dev-admin.ts",
+    "billing:reconcile": "node --env-file-if-exists=.env.local --import tsx scripts/reconcile-billing.ts",
+    "albums:export": "node --import tsx scripts/export-albums.ts",
+    "game:export": "node --import tsx scripts/export-game.ts"
   },
   "dependencies": {
-    "@fal-ai/client": "^1.2.3",
-    "@fal-ai/server-proxy": "^1.1.1",
     "@radix-ui/react-checkbox": "^1.1.4",
     "@radix-ui/react-dialog": "^1.1.6",
     "@radix-ui/react-label": "^2.1.2",
@@ -25,30 +50,37 @@
     "@radix-ui/react-tabs": "^1.1.3",
     "@radix-ui/react-toast": "^1.2.6",
     "@radix-ui/react-tooltip": "^1.2.8",
+    "better-auth": "^1.7.4",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
-    "fal": "^0.1.1",
     "lucide-react": "^0.461.0",
-    "next": "15.0.3",
-    "react": "19.0.0-rc-66855b96-20241106",
-    "react-dom": "19.0.0-rc-66855b96-20241106",
-    "replicate": "^1.4.0",
+    "next": "^15.5.25",
+    "nodemailer": "^10.0.8",
+    "pg": "^8.23.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
     "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7",
     "uuid": "^11.1.0",
-    "wavespeed": "^0.2.3",
     "zod": "^3.24.2"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "@electric-sql/pglite-socket": "^0.2.11",
     "@types/node": "^20.17.23",
-    "@types/react": "^18.3.18",
-    "@types/react-dom": "^18.3.5",
+    "@types/nodemailer": "^8.0.1",
+    "@types/pg": "^8.23.1",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "@types/uuid": "^10.0.0",
     "eslint": "^8.57.1",
-    "eslint-config-next": "15.0.3",
+    "eslint-config-next": "^15.5.25",
+    "fake-indexeddb": "^6.2.5",
+    "playwright-core": "^1.63.0",
     "postcss": "^8.5.3",
     "tailwindcss": "^3.4.17",
+    "tsx": "^4.23.13",
     "typescript": "^5.8.2"
   }
 }

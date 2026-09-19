@@ -2,6 +2,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Download, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
 import { Image } from "@/lib/types";
+import { SaveToAlbumButton } from "@/components/albums/save-to-album-button";
 
 interface ImageDisplayProps {
   result: Image | null;
@@ -10,6 +11,8 @@ interface ImageDisplayProps {
   canNavigate?: boolean;
   onPrevious?: () => void;
   onNext?: () => void;
+  prompt?: string;
+  modelName?: string;
 }
 
 export function ImageDisplay({
@@ -19,6 +22,8 @@ export function ImageDisplay({
   canNavigate,
   onPrevious,
   onNext,
+  prompt,
+  modelName,
 }: ImageDisplayProps) {
   const isVideo = forceVideo || result?.content_type?.startsWith("video/");
 
@@ -55,6 +60,14 @@ export function ImageDisplay({
                 <ChevronRight className="h-4 w-4" />
               </Button>
             </>
+          )}
+          {result && !isVideo && (
+            <SaveToAlbumButton
+              imageUrl={result.url}
+              prompt={prompt}
+              modelName={modelName}
+              className="h-9 w-9 bg-transparent text-foreground hover:bg-accent hover:text-accent-foreground border border-input"
+            />
           )}
           {result && (
             <Button
